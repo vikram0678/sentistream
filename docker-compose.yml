@@ -1,0 +1,258 @@
+# # version: '3.8'
+
+# services:
+#   postgres:
+#     image: postgres:15-alpine
+#     container_name: sentistream-postgres
+#     env_file: .env
+#     environment:
+#       POSTGRES_USER: ${POSTGRES_USER}
+#       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+#       POSTGRES_DB: ${POSTGRES_DB}
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+#       # For dev: - ./backend:/app (uncomment for hot-reload)
+#     healthcheck:
+#       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 5
+#     networks:
+#       - sentistream-net
+#     restart: unless-stopped
+
+#   redis:
+#     image: redis:7-alpine
+#     container_name: sentistream-redis
+#     command: redis-server --appendonly yes  # Enables persistence
+#     volumes:
+#       - redis_data:/data
+#       # For dev: - ./redis.conf:/usr/local/etc/redis/redis.conf (if custom config)
+#     healthcheck:
+#       test: ["CMD", "redis-cli", "ping"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 5
+#     networks:
+#       - sentistream-net
+#     restart: unless-stopped
+
+#   backend:
+#     image: python:3.9-slim
+#     container_name: sentistream-backend
+#     working_dir: /app
+#     volumes:
+#       - ./backend:/app  # Bind for dev hot-reload
+#     env_file: .env
+#     environment:
+#       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${POSTGRES_DB}
+#       REDIS_URL: redis://redis:${REDIS_PORT}
+#     ports:
+#       - "8000:8000"
+#     # command: >
+#     #   bash -c "pip install -r requirements.txt &&
+#     #           uvicorn main:app --host ${API_HOST} --port ${API_PORT} --reload"
+#     command: >
+#       bash -c "apt-get update && apt-get install -y curl && 
+#               pip install -r requirements.txt &&
+#               uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+#     depends_on:
+#       postgres:
+#         condition: service_healthy
+#       redis:
+#         condition: service_healthy
+#     healthcheck:
+#       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+#       interval: 30s
+#       timeout: 10s
+#       retries: 3
+#     networks:
+#       - sentistream-net
+#     restart: unless-stopped
+
+#   worker:
+#     image: python:3.9-slim
+#     container_name: sentistream-worker
+#     working_dir: /app
+#     volumes:
+#       - ./worker:/app  # Bind for dev
+#     env_file: .env
+#     environment:
+#       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:${POSTGRES_PORT}/${POSTGRES_DB}
+#       REDIS_URL: redis://redis:${REDIS_PORT}
+#     command: >
+#       bash -c "pip install -r requirements.txt &&
+#                python worker.py"
+#     depends_on:
+#       postgres:
+#         condition: service_healthy
+#       redis:
+#         condition: service_healthy
+#     networks:
+#       - sentistream-net
+#     restart: unless-stopped
+
+#   ingester:
+#     image: python:3.9-slim
+#     container_name: sentistream-ingester
+#     working_dir: /app
+#     volumes:
+#       - ./ingester:/app  # Bind for dev
+#     env_file: .env
+#     environment:
+#       REDIS_URL: redis://redis:${REDIS_PORT}
+#     command: >
+#       bash -c "pip install -r requirements.txt &&
+#                python ingester.py"
+#     depends_on:
+#       redis:
+#         condition: service_healthy
+#     networks:
+#       - sentistream-net
+#     restart: unless-stopped
+
+#   frontend:
+#     image: node:18-alpine
+#     container_name: sentistream-frontend
+#     working_dir: /app
+#     volumes:
+#       - ./frontend:/app  # Bind for dev hot-reload
+#     ports:
+#       - "3000:3000"
+#     command: >
+#       sh -c "yarn install &&
+#              yarn dev"
+#     depends_on:
+#       - backend  # Optional: Wait for API to be up
+#     networks:
+#       - sentistream-net
+#     restart: unless-stopped
+
+# volumes:
+#   postgres_data:
+#   redis_data:
+
+# networks:
+#   sentistream-net:
+#     driver: bridge
+
+
+
+
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: sentistream-postgres
+    environment:
+      POSTGRES_USER: sentiment_user
+      POSTGRES_PASSWORD: your_secure_password
+      POSTGRES_DB: sentiment_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentiment_user -d sentiment_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sentistream-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: sentistream-redis
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sentistream-net
+
+  backend:
+    image: python:3.9-slim
+    container_name: sentistream-backend
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql://sentiment_user:your_secure_password@postgres:5432/sentiment_db
+      - REDIS_URL=redis://redis:6379
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+    ports:
+      - "8000:8000"
+    # Added apt-get update to ensure curl is available for healthcheck
+    command: >
+      bash -c "apt-get update && apt-get install -y curl && 
+               pip install --no-cache-dir -r requirements.txt &&
+               uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    networks:
+      - sentistream-net
+
+  worker:
+    image: python:3.9-slim
+    container_name: sentistream-worker
+    working_dir: /app
+    volumes:
+      - ./worker:/app
+    environment:
+      - DATABASE_URL=postgresql://sentiment_user:your_secure_password@postgres:5432/sentiment_db
+      - REDIS_URL=redis://redis:6379
+    command: bash -c "pip install --no-cache-dir -r requirements.txt && python worker.py"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sentistream-net
+
+  ingester:
+    image: python:3.9-slim
+    container_name: sentistream-ingester
+    working_dir: /app
+    volumes:
+      - ./ingester:/app
+    environment:
+      - REDIS_URL=redis://redis:6379
+    command: bash -c "pip install --no-cache-dir -r requirements.txt && python ingester.py"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - sentistream-net
+
+  frontend:
+    image: node:18-alpine
+    container_name: sentistream-frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "3000:3000"
+    # Simple sleep to ensure backend is ready before yarn starts
+    command: sh -c "yarn install && yarn dev --host 0.0.0.0"
+    networks:
+      - sentistream-net
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  sentistream-net:
+    driver: bridge
