@@ -1,145 +1,188 @@
-# import os  # <-- This was missing!
-# import logging
-# from datetime import datetime
-# from fastapi import FastAPI, status
-# from fastapi.responses import JSONResponse
-# from sqlalchemy import create_engine, text
-# from sqlalchemy.exc import SQLAlchemyError
-# import redis
-# from redis.exceptions import RedisError
-
-# # Setup logging
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
-
-# # Import models (ensure models.py exists with Base)
-# try:
-#     from models import Base
-#     logger.info("Models imported successfully.")
-# except ImportError as e:
-#     logger.error(f"models.py import failed: {e}. Skipping schema creation.")
-#     Base = None
-
-# app = FastAPI(title="SentiStream API")
-
-# # Auto-create schema on startup (with error handling)
-# try:
-#     engine = create_engine(os.getenv("DATABASE_URL"))
-#     if Base:
-#         Base.metadata.create_all(bind=engine)
-#         logger.info("Database schema created successfully.")
-#     else:
-#         logger.warning("Skipping schema creation (no models).")
-# except Exception as e:
-#     logger.error(f"Database startup error: {e}")
-
-# @app.get("/api/health")
-# async def health_check():
-#     db_status = "disconnected"
-#     redis_status = "disconnected"
-#     stats = {"total_posts": 0, "total_analyses": 0, "recent_posts_1h": 0}
-#     error_msg = None
-
-#     try:
-#         # Test DB
-#         with engine.connect() as conn:
-#             conn.execute(text("SELECT 1"))
-#             conn.commit()
-#             db_status = "connected"
-#             logger.info("Health: DB connected.")
-#     except SQLAlchemyError as e:
-#         error_msg = f"DB error: {e}"
-#         logger.error(error_msg)
-#     except Exception as e:
-#         error_msg = f"Unexpected DB error: {e}"
-#         logger.error(error_msg)
-
-#     try:
-#         # Test Redis
-#         r = redis.from_url(os.getenv("REDIS_URL", "redis://redis:6379"))
-#         r.ping()
-#         redis_status = "connected"
-#         logger.info("Health: Redis connected.")
-#     except RedisError as e:
-#         error_msg = f"Redis error: {e}"
-#         logger.error(error_msg)
-#     except Exception as e:
-#         error_msg = f"Unexpected Redis error: {e}"
-#         logger.error(error_msg)
-
-#     # Determine overall status
-#     overall_status = "healthy" if db_status == "connected" and redis_status == "connected" else "unhealthy"
-#     http_status = status.HTTP_200_OK if overall_status == "healthy" else status.HTTP_503_SERVICE_UNAVAILABLE
-
-#     response = {
-#         "status": overall_status,
-#         "timestamp": datetime.utcnow().isoformat() + "Z",
-#         "services": {"database": db_status, "redis": redis_status},
-#         "stats": stats
-#     }
-#     if error_msg:
-#         response["error"] = error_msg
-
-#     logger.info(f"Health response: {response}")
-#     return JSONResponse(status_code=http_status, content=response)
-
-# if __name__ == "__main__":
-#     import uvicorn
-#     host = os.getenv("API_HOST", "0.0.0.0")
-#     port = int(os.getenv("API_PORT", 8000))
-#     logger.info(f"Starting server on {host}:{port}")
-#     uvicorn.run(app, host=host, port=port, log_level="info")
-
-
-
-
-
-
 import os
-import logging
-import redis
-from datetime import datetime
-from fastapi import FastAPI, status
-from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine, text
-from models import Base
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import json
+from datetime import datetime, timedelta
+from typing import List, Optional
+from fastapi import FastAPI, Query, HTTPException, Depends
+from sqlalchemy import create_engine, func, desc, text
+from sqlalchemy.orm import sessionmaker, Session
+from redis import Redis
+from models import SocialMediaPost, SentimentAnalysis
 
 app = FastAPI(title="SentiStream API")
 
+# --- Setup ---
 DATABASE_URL = os.getenv("DATABASE_URL")
-REDIS_URL = os.getenv("REDIS_URL")
-
 engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-@app.on_event("startup")
-def startup_event():
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database initialized.")
+redis_client = Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, decode_responses=True)
 
-@app.get("/api/health")
-async def health_check():
-    health = {"database": "disconnected", "redis": "disconnected"}
+def get_db():
+    db = SessionLocal()
     try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-            health["database"] = "connected"
+        yield db
+    finally:
+        db.close()
+
+# --- Endpoint 1: Health Check (2 Points) ---
+@app.get("/api/health")
+async def health_check(db: Session = Depends(get_db)):
+    status = "healthy"
+    services = {"database": "connected", "redis": "connected"}
+    
+    try:
+        db.execute(text("SELECT 1"))
+    except:
+        services["database"] = "disconnected"
+        status = "unhealthy"
         
-        r = redis.from_url(REDIS_URL)
-        if r.ping():
-            health["redis"] = "connected"
-            
-        is_healthy = all(v == "connected" for v in health.values())
-        return JSONResponse(
-            status_code=status.HTTP_200_OK if is_healthy else status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={
-                "status": "healthy" if is_healthy else "unhealthy",
-                "timestamp": datetime.utcnow().isoformat() + "Z",
-                "services": health,
-                "stats": {"total_posts": 0} 
+    try:
+        redis_client.ping()
+    except:
+        services["redis"] = "disconnected"
+        status = "unhealthy"
+
+    total_posts = db.query(SocialMediaPost).count()
+    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+    recent_posts = db.query(SocialMediaPost).filter(SocialMediaPost.created_at >= one_hour_ago).count()
+
+    response = {
+        "status": status,
+        "timestamp": datetime.utcnow().isoformat(),
+        "services": services,
+        "stats": {
+            "total_posts": total_posts,
+            "total_analyses": db.query(SentimentAnalysis).count(),
+            "recent_posts_1h": recent_posts
+        }
+    }
+    
+    if status == "unhealthy":
+        raise HTTPException(status_code=503, detail=response)
+    return response
+
+# --- Endpoint 2: Get Posts (5 Points) ---
+@app.get("/api/posts")
+async def get_posts(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    source: Optional[str] = None,
+    sentiment: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    query = db.query(SocialMediaPost, SentimentAnalysis).join(
+        SentimentAnalysis, SocialMediaPost.post_id == SentimentAnalysis.post_id
+    )
+
+    if source:
+        query = query.filter(SocialMediaPost.source == source)
+    if sentiment:
+        query = query.filter(SentimentAnalysis.sentiment_label == sentiment)
+
+    total = query.count()
+    results = query.order_by(desc(SocialMediaPost.created_at)).offset(offset).limit(limit).all()
+
+    return {
+        "posts": [{
+            "post_id": p.post_id,
+            "source": p.source,
+            "content": p.content,
+            "author": p.author,
+            "created_at": p.created_at,
+            "sentiment": {
+                "label": s.sentiment_label,
+                "confidence": s.confidence_score,
+                "emotion": s.emotion,
+                "model_name": s.model_name
             }
-        )
-    except Exception as e:
-        return JSONResponse(status_code=503, content={"status": "unhealthy", "error": str(e)})
+        } for p, s in results],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "filters": {"source": source, "sentiment": sentiment}
+    }
+
+# --- Endpoint 3: Aggregate Sentiment (5 Points) ---
+@app.get("/api/sentiment/aggregate")
+async def get_sentiment_aggregate(
+    period: str = Query(..., regex="^(minute|hour|day)$"),
+    db: Session = Depends(get_db)
+):
+    # PostgreSQL date_trunc logic
+    trunc = func.date_trunc(period, SocialMediaPost.created_at)
+    
+    results = db.query(
+        trunc.label("ts"),
+        SentimentAnalysis.sentiment_label,
+        func.count(SentimentAnalysis.id).label("count"),
+        func.avg(SentimentAnalysis.confidence_score).label("avg_conf")
+    ).join(SentimentAnalysis, SocialMediaPost.post_id == SentimentAnalysis.post_id)\
+     .group_by("ts", SentimentAnalysis.sentiment_label)\
+     .order_by("ts").all()
+
+    # Process results into the required nested structure
+    data_map = {}
+    for ts, label, count, avg_conf in results:
+        ts_iso = ts.isoformat()
+        if ts_iso not in data_map:
+            data_map[ts_iso] = {"timestamp": ts_iso, "pos": 0, "neg": 0, "neu": 0, "conf_sum": 0, "count": 0}
+        
+        if "pos" in label: data_map[ts_iso]["pos"] += count
+        elif "neg" in label: data_map[ts_iso]["neg"] += count
+        else: data_map[ts_iso]["neu"] += count
+        
+        data_map[ts_iso]["count"] += count
+        data_map[ts_iso]["conf_sum"] += (avg_conf * count)
+
+    final_data = []
+    for item in data_map.values():
+        total = item["count"]
+        final_data.append({
+            "timestamp": item["timestamp"],
+            "positive_count": item["pos"],
+            "negative_count": item["neg"],
+            "neutral_count": item["neu"],
+            "total_count": total,
+            "positive_percentage": round((item["pos"]/total)*100, 2),
+            "average_confidence": round(item["conf_sum"]/total, 2)
+        })
+
+    return {"period": period, "data": final_data}
+
+# --- Endpoint 4: Sentiment Distribution (3 Points) ---
+@app.get("/api/sentiment/distribution")
+async def get_sentiment_distribution(hours: int = 24, db: Session = Depends(get_db)):
+    cache_key = f"dist_{hours}"
+    cached = redis_client.get(cache_key)
+    if cached:
+        return {**json.loads(cached), "cached": True}
+
+    threshold = datetime.utcnow() - timedelta(hours=hours)
+    
+    # Get Counts
+    dist_query = db.query(
+        SentimentAnalysis.sentiment_label, func.count(SentimentAnalysis.id)
+    ).join(SocialMediaPost, SocialMediaPost.post_id == SentimentAnalysis.post_id)\
+     .filter(SocialMediaPost.created_at >= threshold)\
+     .group_by(SentimentAnalysis.sentiment_label).all()
+    
+    dist = {label: count for label, count in dist_query}
+    total = sum(dist.values()) or 1
+    
+    # Get Top Emotions
+    emotions = db.query(SentimentAnalysis.emotion, func.count(SentimentAnalysis.id))\
+        .filter(SentimentAnalysis.post_id.in_(
+            db.query(SocialMediaPost.post_id).filter(SocialMediaPost.created_at >= threshold)
+        ))\
+        .group_by(SentimentAnalysis.emotion).order_by(desc(func.count(SentimentAnalysis.id))).limit(5).all()
+
+    result = {
+        "timeframe_hours": hours,
+        "distribution": dist,
+        "total": total,
+        "top_emotions": {e: c for e, c in emotions},
+        "cached": False
+    }
+    
+    redis_client.setex(cache_key, 60, json.dumps(result, default=str))
+    return result
