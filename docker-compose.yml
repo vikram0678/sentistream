@@ -139,6 +139,128 @@
 
 
 
+# version: '3.8'
+
+# services:
+#   postgres:
+#     image: postgres:15-alpine
+#     container_name: sentistream-postgres
+#     environment:
+#       POSTGRES_USER: sentiment_user
+#       POSTGRES_PASSWORD: your_secure_password
+#       POSTGRES_DB: sentiment_db
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+#     healthcheck:
+#       test: ["CMD-SHELL", "pg_isready -U sentiment_user -d sentiment_db"]
+#       interval: 5s
+#       timeout: 5s
+#       retries: 5
+#     networks:
+#       - sentistream-net
+
+#   redis:
+#     image: redis:7-alpine
+#     container_name: sentistream-redis
+#     command: redis-server --appendonly yes
+#     healthcheck:
+#       test: ["CMD", "redis-cli", "ping"]
+#       interval: 5s
+#       timeout: 5s
+#       retries: 5
+#     networks:
+#       - sentistream-net
+
+#   backend:
+#     image: python:3.9-slim
+#     container_name: sentistream-backend
+#     working_dir: /app
+#     volumes:
+#       - ./backend:/app
+#     environment:
+#       - DATABASE_URL=postgresql://sentiment_user:your_secure_password@postgres:5432/sentiment_db
+#       - REDIS_URL=redis://redis:6379
+#       - API_HOST=0.0.0.0
+#       - API_PORT=8000
+#     ports:
+#       - "8000:8000"
+#     # Added apt-get update to ensure curl is available for healthcheck
+#     command: >
+#       bash -c "apt-get update && apt-get install -y curl && 
+#                pip install --no-cache-dir -r requirements.txt &&
+#                uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+#     depends_on:
+#       postgres:
+#         condition: service_healthy
+#       redis:
+#         condition: service_healthy
+#     healthcheck:
+#       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+#       interval: 10s
+#       timeout: 5s
+#       retries: 3
+#       start_period: 40s
+#     networks:
+#       - sentistream-net
+
+#   worker:
+#     image: python:3.9-slim
+#     container_name: sentistream-worker
+#     working_dir: /app
+#     volumes:
+#       - ./worker:/app
+#     environment:
+#       - DATABASE_URL=postgresql://sentiment_user:your_secure_password@postgres:5432/sentiment_db
+#       - REDIS_URL=redis://redis:6379
+#       - HF_HUB_ENABLE_HF_TRANSFER=1
+#     command: bash -c "pip install --no-cache-dir -r requirements.txt && python worker.py"
+#     depends_on:
+#       postgres:
+#         condition: service_healthy
+#       redis:
+#         condition: service_healthy
+#     networks:
+#       - sentistream-net
+
+#   ingester:
+#     image: python:3.9-slim
+#     container_name: sentistream-ingester
+#     working_dir: /app
+#     volumes:
+#       - ./ingester:/app
+#     environment:
+#       - REDIS_URL=redis://redis:6379
+#     command: bash -c "pip install --no-cache-dir -r requirements.txt && python ingester.py"
+#     depends_on:
+#       redis:
+#         condition: service_healthy
+#     networks:
+#       - sentistream-net
+
+#   frontend:
+#     image: node:18-alpine
+#     container_name: sentistream-frontend
+#     working_dir: /app
+#     volumes:
+#       - ./frontend:/app
+#     ports:
+#       - "3000:3000"
+#     # Simple sleep to ensure backend is ready before yarn starts
+#     command: sh -c "yarn install && yarn dev --host 0.0.0.0"
+#     networks:
+#       - sentistream-net
+
+# volumes:
+#   postgres_data:
+#   redis_data:
+
+# networks:
+#   sentistream-net:
+#     driver: bridge
+
+
+
+
 version: '3.8'
 
 services:
@@ -168,6 +290,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    volumes:
+      - redis_data:/data
     networks:
       - sentistream-net
 
@@ -177,6 +301,7 @@ services:
     working_dir: /app
     volumes:
       - ./backend:/app
+      - huggingface_cache:/root/.cache/huggingface
     environment:
       - DATABASE_URL=postgresql://sentiment_user:your_secure_password@postgres:5432/sentiment_db
       - REDIS_URL=redis://redis:6379
@@ -184,7 +309,6 @@ services:
       - API_PORT=8000
     ports:
       - "8000:8000"
-    # Added apt-get update to ensure curl is available for healthcheck
     command: >
       bash -c "apt-get update && apt-get install -y curl && 
                pip install --no-cache-dir -r requirements.txt &&
@@ -209,10 +333,15 @@ services:
     working_dir: /app
     volumes:
       - ./worker:/app
+      - huggingface_cache:/root/.cache/huggingface
     environment:
       - DATABASE_URL=postgresql://sentiment_user:your_secure_password@postgres:5432/sentiment_db
       - REDIS_URL=redis://redis:6379
-    command: bash -c "pip install --no-cache-dir -r requirements.txt && python worker.py"
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+    command: >
+      bash -c "pip install --no-cache-dir redis sqlalchemy psycopg2-binary transformers httpx && 
+               pip install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir &&
+               python worker.py"
     depends_on:
       postgres:
         condition: service_healthy
@@ -229,7 +358,8 @@ services:
       - ./ingester:/app
     environment:
       - REDIS_URL=redis://redis:6379
-    command: bash -c "pip install --no-cache-dir -r requirements.txt && python ingester.py"
+      - DATABASE_URL=postgresql://sentiment_user:your_secure_password@postgres:5432/sentiment_db
+    command: tail -f /dev/null
     depends_on:
       redis:
         condition: service_healthy
@@ -244,7 +374,6 @@ services:
       - ./frontend:/app
     ports:
       - "3000:3000"
-    # Simple sleep to ensure backend is ready before yarn starts
     command: sh -c "yarn install && yarn dev --host 0.0.0.0"
     networks:
       - sentistream-net
@@ -252,6 +381,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  huggingface_cache: # This volume saves models so you don't download them twice
 
 networks:
   sentistream-net:
