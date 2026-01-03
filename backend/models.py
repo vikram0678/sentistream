@@ -51,6 +51,8 @@ from datetime import datetime
 # Define Base here to avoid relative import issues in your environment
 Base = declarative_base()
 
+
+
 class SocialMediaPost(Base):
     """
     Table 1: social_media_posts
@@ -116,6 +118,9 @@ class SentimentAlert(Base):
     # Required: Float
     actual_value = Column(Float, nullable=False)
     # Required: DateTime
+
+    window_minutes = Column(Integer, nullable=False, default=5)
+
     window_start = Column(DateTime, nullable=False)
     # Required: DateTime
     window_end = Column(DateTime, nullable=False)

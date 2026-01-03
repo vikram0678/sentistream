@@ -261,7 +261,7 @@
 
 
 
-version: '3.8'
+# version: '3.8'
 
 services:
   postgres:
@@ -296,23 +296,52 @@ services:
       - sentistream-net
 
   backend:
-    image: python:3.9-slim
+    # image: python:3.9-slim
+    # container_name: sentistream-backend
+    # working_dir: /app
+    # volumes:
+    #   - ./backend:/app
+    #   - huggingface_cache:/root/.cache/huggingface
+    # environment:
+    #   - DATABASE_URL=postgresql://sentiment_user:your_secure_password@postgres:5432/sentiment_db
+    #   - REDIS_URL=redis://redis:6379
+    #   - API_HOST=0.0.0.0
+    #   - API_PORT=8000
+    # ports:
+    #   - "8000:8000"
+    # # command: >
+    # #   bash -c "apt-get update && apt-get install -y curl && 
+    # #            pip install --no-cache-dir -r requirements.txt &&
+    # #            uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    # depends_on:
+    #   postgres:
+    #     condition: service_healthy
+    #   redis:
+    #     condition: service_healthy
+    # healthcheck:
+    #   test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 3
+    #   start_period: 40s
+    # networks:
+    #   - sentistream-net
+
+    build: ./backend  # This points to the Dockerfile we just made
     container_name: sentistream-backend
-    working_dir: /app
     volumes:
       - ./backend:/app
       - huggingface_cache:/root/.cache/huggingface
     environment:
       - DATABASE_URL=postgresql://sentiment_user:your_secure_password@postgres:5432/sentiment_db
       - REDIS_URL=redis://redis:6379
-      - API_HOST=0.0.0.0
-      - API_PORT=8000
+      - REDIS_HOST=redis
+      - ALERT_NEGATIVE_RATIO_THRESHOLD=2.0
+      - ALERT_WINDOW_MINUTES=5
+      - ALERT_MIN_POSTS=10
     ports:
       - "8000:8000"
-    command: >
-      bash -c "apt-get update && apt-get install -y curl && 
-               pip install --no-cache-dir -r requirements.txt &&
-               uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
+    # Notice: NO more 'command' with apt-get! The Dockerfile handles it now.
     depends_on:
       postgres:
         condition: service_healthy
@@ -322,8 +351,8 @@ services:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 40s
+      retries: 5
+      start_period: 20s
     networks:
       - sentistream-net
 
