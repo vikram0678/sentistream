@@ -1,15 +1,3 @@
-
-# fastapi==0.104.1
-# uvicorn[standard]==0.24.0
-# sqlalchemy==2.0.23
-# psycopg2-binary==2.9.9
-# redis==5.0.1
-# hf_transfer
-# transformers
-# httpx
-# torch --index-url https://download.pytorch.org/whl/cpu
-
-
 redis
 sqlalchemy
 psycopg2-binary
