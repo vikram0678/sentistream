@@ -1,7 +1,15 @@
-.env
+cat <<EOT > .gitignore
+# Dependencies
+node_modules/
+frontend/node_modules/
+.venv/
+python-env/
 __pycache__/
 *.pyc
-venv/
-.DS_Store
-postgres_data/
-redis_data/
+
+# Docker
+.docker-cache/
+
+# Environment
+.env
+EOT
