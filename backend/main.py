@@ -5,6 +5,8 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+
+from websockets.exceptions import ConnectionClosedError
 from fastapi import FastAPI, Query, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from sqlalchemy import create_engine, func, desc, text
 from sqlalchemy.orm import sessionmaker, Session
@@ -12,6 +14,11 @@ from redis import Redis
 
 from services.alerting import AlertService
 from models import Base, SocialMediaPost, SentimentAnalysis, SentimentAlert
+
+from fastapi.middleware.cors import CORSMiddleware
+
+
+
 
 # 1. Setup Logging
 logging.basicConfig(level=logging.INFO)
@@ -27,6 +34,16 @@ Base.metadata.create_all(bind=engine)
 
 # 4. Initialize FastAPI and Redis
 app = FastAPI(title="SentiStream API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # Add your frontend URL here
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 redis_client = Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, decode_responses=True)
 
 # ... (rest of your code: ConnectionManager, get_db, endpoints, etc.) ...
@@ -43,24 +60,23 @@ class ConnectionManager:
         self.active_connections: List[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
+        # 1. Accept the connection FIRST
         await websocket.accept()
+        
+        # 2. Add to list
         self.active_connections.append(websocket)
-        await websocket.send_json({
-            "type": "connected",
-            "message": "Connected to sentiment stream",
-            "timestamp": datetime.utcnow().isoformat()
-        })
+        
+        # 3. Try to send the welcome message, but catch errors if they disconnect immediately
+        try:
+            await websocket.send_json({
+                "type": "connected",
+                "message": "Connected to sentiment stream",
+                "timestamp": datetime.utcnow().isoformat()
+            })
+        except Exception as e:
+            logger.error(f"Error sending welcome message: {e}")
+            self.disconnect(websocket)
 
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict):
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception:
-                pass 
 
 manager = ConnectionManager()
 
@@ -256,16 +272,19 @@ async def get_sentiment_distribution(hours: int = 24, db: Session = Depends(get_
     redis_client.setex(cache_key, 60, json.dumps(result, default=str))
     return result
 
+
+
 # --- WebSocket Endpoint ---
 @app.websocket("/ws/sentiment")
 async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    await manager.connect(websocket) # This now handles accept()
+    
     pubsub = redis_client.pubsub()
     pubsub.subscribe("sentiment_events")
     
     try:
         while True:
-            # Non-blocking message check
+            # Check for messages from Redis
             message = pubsub.get_message(ignore_subscribe_messages=True)
             if message:
                 raw_data = json.loads(message['data'])
@@ -281,6 +300,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         "timestamp": datetime.utcnow().isoformat()
                     }
                 })
-            await asyncio.sleep(0.01) # Small sleep to yield to background tasks
-    except WebSocketDisconnect:
+            
+            # Check if the client is still there by receiving (non-blocking-ish)
+            # This prevents the "ConnectionClosedError" by reacting to client drops
+            try:
+                await asyncio.wait_for(websocket.receive_text(), timeout=0.01)
+            except asyncio.TimeoutError:
+                pass # This is normal, just means no message from client
+                
+            await asyncio.sleep(0.01) 
+    except (WebSocketDisconnect, ConnectionClosedError):
         manager.disconnect(websocket)
+    finally:
+        pubsub.unsubscribe("sentiment_events")
