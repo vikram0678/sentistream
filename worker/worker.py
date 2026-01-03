@@ -1,300 +1,3 @@
-# import os
-# import asyncio
-# import json
-# import logging
-# from redis.asyncio import Redis
-# from sqlalchemy import create_engine
-# from sqlalchemy.orm import sessionmaker
-# from services.sentiment_analyzer import SentimentAnalyzer
-# from models import Base, SocialMediaPost, SentimentAnalysis
-
-# # Configure logging
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger("Worker")
-
-# # Database Setup
-# DATABASE_URL = os.getenv("DATABASE_URL")
-# engine = create_engine(DATABASE_URL)
-# SessionLocal = sessionmaker(bind=engine)
-
-# async def process_stream():
-#     # 1. Initialize Redis and AI Analyzer
-#     redis = Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, decode_responses=True)
-#     analyzer = SentimentAnalyzer(model_type='local')
-#     stream_name = os.getenv("REDIS_STREAM_NAME", "social_posts_stream")
-#     group_name = "sentiment_workers"
-#     consumer_name = "worker_1"
-
-#     # 2. Create Consumer Group if it doesn't exist
-#     try:
-#         await redis.xgroup_create(stream_name, group_name, id="0", mkstream=True)
-#     except Exception:
-#         logger.info("Consumer group already exists.")
-
-#     logger.info("Worker started. Listening for posts...")
-
-#     while True:
-#         try:
-#             # 3. Read new messages (XREADGROUP)
-#             # This waits for 1 second (block=1000) for new messages
-#             messages = await redis.xreadgroup(group_name, consumer_name, {stream_name: ">"}, count=1, block=1000)
-
-#             for stream, msgs in messages:
-#                 for msg_id, data in msgs:
-#                     logger.info(f"Processing post: {data['post_id']}")
-                    
-#                     # 4. Run AI Analysis
-#                     sentiment = await analyzer.analyze_sentiment(data['content'])
-#                     emotion = await analyzer.analyze_emotion(data['content'])
-
-#                     # 5. Save results to Postgres
-#                     db = SessionLocal()
-#                     try:
-#                         # Add Sentiment Analysis Record
-#                         analysis = SentimentAnalysis(
-#                             post_id=data['post_id'],
-#                             model_name=sentiment['model_name'],
-#                             sentiment_label=sentiment['sentiment_label'],
-#                             confidence_score=sentiment['confidence_score'],
-#                             emotion=emotion['emotion']
-#                         )
-#                         db.add(analysis)
-#                         db.commit()
-                        
-#                         # Acknowledge message in Redis
-#                         await redis.xack(stream_name, group_name, msg_id)
-#                         logger.info(f"Successfully analyzed and saved: {data['post_id']}")
-#                     finally:
-#                         db.close()
-
-#         except Exception as e:
-#             logger.error(f"Error in worker loop: {e}")
-#             await asyncio.sleep(2)
-
-# if __name__ == "__main__":
-#     asyncio.run(process_stream())
-
-
-
-
-# import os
-# import asyncio
-# import logging
-# from redis.asyncio import Redis
-# from sqlalchemy import create_engine
-# from sqlalchemy.orm import sessionmaker
-# from services.sentiment_analyzer import SentimentAnalyzer
-# from models import SocialMediaPost, SentimentAnalysis
-
-# # Configure logging
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger("Worker")
-
-# # Database Setup
-# DATABASE_URL = os.getenv("DATABASE_URL")
-# engine = create_engine(DATABASE_URL)
-# SessionLocal = sessionmaker(bind=engine)
-
-# async def process_stream():
-#     # Initialize Redis and AI Analyzer
-#     redis = Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, decode_responses=True)
-#     analyzer = SentimentAnalyzer(model_type='local')
-#     stream_name = os.getenv("REDIS_STREAM_NAME", "social_posts_stream")
-#     group_name = "sentiment_workers"
-#     consumer_name = "worker_1"
-
-#     # Create Consumer Group if it doesn't exist
-#     try:
-#         await redis.xgroup_create(stream_name, group_name, id="0", mkstream=True)
-#     except Exception:
-#         logger.info("Consumer group already exists.")
-
-#     logger.info("🚀 Worker started. Listening for posts...")
-
-#     while True:
-#         try:
-#             # Read new messages from Redis Stream
-#             messages = await redis.xreadgroup(group_name, consumer_name, {stream_name: ">"}, count=1, block=1000)
-#             if not messages:
-#                 continue
-
-#             for stream, msgs in messages:
-#                 for msg_id, data in msgs:
-#                     db = SessionLocal()
-#                     try:
-#                         # STEP 1: Handle the Post (The "Parent" record)
-#                         existing_post = db.query(SocialMediaPost).filter_by(post_id=data['post_id']).first()
-#                         if not existing_post:
-#                             try:
-#                                 new_post = SocialMediaPost(
-#                                     post_id=data['post_id'],
-#                                     source=data['source'],
-#                                     content=data['content'],
-#                                     author=data['author']
-#                                 )
-#                                 db.add(new_post)
-#                                 db.flush() 
-#                             except Exception:
-#                                 db.rollback() # Someone else saved it already
-#                                 logger.info(f"Post {data['post_id']} already exists, moving to analysis.")
-
-#                         # STEP 2: Run AI Analysis
-#                         sentiment = await analyzer.analyze_sentiment(data['content'])
-#                         emotion = await analyzer.analyze_emotion(data['content'])
-
-#                         # STEP 3: Save Analysis Result
-#                         analysis = SentimentAnalysis(
-#                             post_id=data['post_id'],
-#                             model_name=sentiment['model_name'],
-#                             sentiment_label=sentiment['sentiment_label'],
-#                             confidence_score=sentiment['confidence_score'],
-#                             emotion=emotion['emotion']
-#                         )
-#                         db.add(analysis)
-#                         db.commit()
-                        
-#                         # Acknowledge Redis message
-#                         await redis.xack(stream_name, group_name, msg_id)
-#                         logger.info(f"✅ Analyzed: {data['post_id']} | Result: {sentiment['sentiment_label']}")
-                        
-#                     except Exception as e:
-#                         db.rollback()
-#                         logger.error(f"Error processing {data.get('post_id')}: {e}")
-#                     finally:
-#                         db.close()
-
-#         except Exception as e:
-#             logger.error(f"Worker Loop Error: {e}")
-#             await asyncio.sleep(2)
-
-# if __name__ == "__main__":
-#     asyncio.run(process_stream())
-
-
-
-
-# Criteria,Status,Points
-# Class Structure,✅ Passed. You initialized with 'local' (that's what downloaded earlier).,2 / 2
-# Sentiment Accuracy,✅ Passed. Your logs show Result: positive/negative in the correct format.,6 / 6
-# Emotion Detection,"✅ Passed. Your table shows joy, fear, sadness, etc. with high counts.",3 / 3
-# Batch Processing,⚠️ Check needed. Is your worker.py processing posts one by one or in a list?,1 / 2
-# Error Handling,⚠️ Check needed. We need to ensure it doesn't crash if it sees an empty post.,1 / 2
-
-
-
-
-
-
-
-
-# import os
-# import asyncio
-# import logging
-# from redis.asyncio import Redis
-# from sqlalchemy import create_engine
-# from sqlalchemy.orm import sessionmaker
-# from services.sentiment_analyzer import SentimentAnalyzer
-# from models import SocialMediaPost, SentimentAnalysis
-
-# # Configure logging
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger("Worker")
-
-# # Database Setup
-# DATABASE_URL = os.getenv("DATABASE_URL")
-# engine = create_engine(DATABASE_URL)
-# SessionLocal = sessionmaker(bind=engine)
-
-# async def process_stream():
-#     # Initialize Redis and AI Analyzer
-#     redis = Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, decode_responses=True)
-#     analyzer = SentimentAnalyzer(model_type='local')
-#     stream_name = os.getenv("REDIS_STREAM_NAME", "social_posts_stream")
-#     group_name = "sentiment_workers"
-#     consumer_name = "worker_1"
-
-#     # Create Consumer Group if it doesn't exist
-#     try:
-#         await redis.xgroup_create(stream_name, group_name, id="0", mkstream=True)
-#     except Exception:
-#         logger.info("Consumer group already exists.")
-
-#     logger.info("🚀 Worker started. Listening for posts (Batch Mode Enabled)...")
-
-#     while True:
-#         try:
-#             # --- BATCH PROCESSING (CRITERIA SATISFIED) ---
-#             # We read up to 10 messages at once to improve efficiency
-#             messages = await redis.xreadgroup(group_name, consumer_name, {stream_name: ">"}, count=10, block=1000)
-            
-#             if not messages:
-#                 continue
-
-#             for stream, msgs in messages:
-#                 for msg_id, data in msgs:
-#                     # --- ERROR HANDLING (CRITERIA SATISFIED) ---
-#                     # Gracefully handle empty strings, None, or very long text
-#                     content = data.get('content', '')
-#                     if not content or str(content).strip() == "":
-#                         logger.warning(f"Skipping post {data.get('post_id')} due to empty content.")
-#                         await redis.xack(stream_name, group_name, msg_id)
-#                         continue
-
-#                     db = SessionLocal()
-#                     try:
-#                         # STEP 1: Handle the Post (The "Parent" record)
-#                         existing_post = db.query(SocialMediaPost).filter_by(post_id=data['post_id']).first()
-#                         if not existing_post:
-#                             try:
-#                                 new_post = SocialMediaPost(
-#                                     post_id=data['post_id'],
-#                                     source=data.get('source', 'unknown'),
-#                                     content=content,
-#                                     author=data.get('author', 'anonymous')
-#                                 )
-#                                 db.add(new_post)
-#                                 db.flush() 
-#                             except Exception:
-#                                 db.rollback()
-#                                 logger.info(f"Post {data['post_id']} handled by another worker.")
-
-#                         # STEP 2: Run AI Analysis
-#                         sentiment = await analyzer.analyze_sentiment(content)
-#                         emotion = await analyzer.analyze_emotion(content)
-
-#                         # STEP 3: Save Analysis Result
-#                         analysis = SentimentAnalysis(
-#                             post_id=data['post_id'],
-#                             model_name=sentiment['model_name'],
-#                             sentiment_label=sentiment['sentiment_label'],
-#                             confidence_score=sentiment['confidence_score'],
-#                             emotion=emotion['emotion']
-#                         )
-#                         db.add(analysis)
-#                         db.commit()
-                        
-#                         # Acknowledge Redis message
-#                         await redis.xack(stream_name, group_name, msg_id)
-#                         logger.info(f"✅ Analyzed: {data['post_id']} | Result: {sentiment['sentiment_label']}")
-                        
-#                     except Exception as e:
-#                         db.rollback()
-#                         logger.error(f"Error processing {data.get('post_id')}: {e}")
-#                     finally:
-#                         db.close()
-
-#         except Exception as e:
-#             logger.error(f"Worker Loop Error: {e}")
-#             await asyncio.sleep(2)
-
-# if __name__ == "__main__":
-#     asyncio.run(process_stream())
-
-
-
-
-
-
 import os
 import asyncio
 import logging
@@ -367,26 +70,68 @@ class SentimentWorker:
         except Exception:
             logger.info("Consumer group ready.")
 
+# Inside worker/worker.py
+
     async def process_message(self, message_id, message_data):
-        db = self.SessionLocal()
-        try:
-            # 1. Run AI Analysis
-            sentiment = await self.analyzer.analyze_sentiment(message_data['content'])
-            emotion = await self.analyzer.analyze_emotion(message_data['content'])
+        # This is where we add the "with" block to create a private DB session
+        # for THIS specific message. This prevents the "Different Loop" error.
+        with self.SessionLocal() as db: 
+            try:
+                # 1. Run your AI analysis
+                sentiment = await self.analyzer.analyze_sentiment(message_data['content'])
+                emotion = await self.analyzer.analyze_emotion(message_data['content'])
 
-            # FIX 2: Call the sync function in an executor thread
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, save_post_and_analysis, db, message_data, sentiment, emotion)
+                # 2. Use the 'db' session we just created to save the data
+                # We use the executor to keep the database work from blocking the loop
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None, 
+                    self.save_to_db,  # This is a helper function we define below
+                    db, 
+                    message_data, 
+                    sentiment, 
+                    emotion
+                )
 
-            # 3. Acknowledge
-            await self.redis.xack(self.stream_name, self.group_name, message_id)
-            logger.info(f"✅ Processed: {message_data.get('post_id')}")
-            return True
-        except Exception as e:
-            logger.error(f"❌ Error processing {message_id}: {e}")
-            return False
-        finally:
-            db.close()
+                # 3. Tell Redis we are done
+                await self.redis.xack(self.stream_name, self.group_name, message_id)
+                logger.info(f"✅ Processed: {message_data.get('post_id')}")
+                
+            except Exception as e:
+                logger.error(f"❌ Error processing {message_id}: {e}")
+                db.rollback() # Rollback if something fails
+    # --- ADD IT HERE ---
+    def save_to_db(self, db, data, sentiment, emotion):
+        """Safe database save that handles different AI return formats"""
+        from models import SocialMediaPost, SentimentAnalysis
+        from datetime import datetime
+        
+        # 1. Save or Update the Post
+        post = SocialMediaPost(
+            post_id=data['post_id'],
+            source=data.get('source', 'unknown'),
+            content=data['content'],
+            author=data.get('author', 'unknown'),
+            created_at=datetime.utcnow()
+        )
+        db.merge(post) 
+        
+        # 2. Extract AI results safely (The fix for the 'label' error)
+        # We try all possible keys used by HuggingFace pipelines
+        label = sentiment.get('label') or sentiment.get('sentiment_label') or 'neutral'
+        score = sentiment.get('score') or sentiment.get('confidence_score') or 0.0
+        emo = emotion.get('label') or emotion.get('emotion') or 'neutral'
+
+        # 3. Save the Analysis
+        analysis = SentimentAnalysis(
+            post_id=data['post_id'],
+            model_name="distilbert-sst2",
+            sentiment_label=label,
+            confidence_score=score,
+            emotion=emo
+        )
+        db.add(analysis)
+        db.commit()
 
     async def run(self, batch_size=10, block_ms=5000):
         await self.setup()
@@ -406,6 +151,9 @@ class SentimentWorker:
                 await asyncio.sleep(2)
 
 if __name__ == "__main__":
+    from models import Base
+    Base.metadata.create_all(bind=engine)
+
     redis_conn = Redis(host=os.getenv("REDIS_HOST", "redis"), port=6379, decode_responses=True)
     worker = SentimentWorker(redis_conn, SessionLocal, os.getenv("REDIS_STREAM_NAME", "social_posts_stream"), "sentiment_workers")
     asyncio.run(worker.run())
