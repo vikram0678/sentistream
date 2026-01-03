@@ -25,7 +25,7 @@ This project uses a 6-service microservice architecture. For a detailed breakdow
 
 ```bash
 # Clone repository
-git clone <your-repo-url>
+git clone https://github.com/vikram0678/sentistream.git
 cd sentistream
 
 # Copy environment template
