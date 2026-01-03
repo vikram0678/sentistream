@@ -395,6 +395,18 @@ services:
     networks:
       - sentistream-net
 
+  # frontend:
+  #   image: node:18-alpine
+  #   container_name: sentistream-frontend
+  #   working_dir: /app
+  #   volumes:
+  #     - ./frontend:/app
+  #   ports:
+  #     - "3000:3000"
+  #   command: sh -c "yarn install && yarn dev --host 0.0.0.0"
+  #   networks:
+  #     - sentistream-net
+
   frontend:
     image: node:18-alpine
     container_name: sentistream-frontend
@@ -403,7 +415,9 @@ services:
       - ./frontend:/app
     ports:
       - "3000:3000"
-    command: sh -c "yarn install && yarn dev --host 0.0.0.0"
+    # Changed from yarn dev to npm start
+    # This forces a fresh install and then starts the app
+    command: sh -c "npm install && npm start"
     networks:
       - sentistream-net
 
